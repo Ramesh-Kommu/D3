@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connected Bubble Chart with Tooltips</title>
+    <script src="https://d3js.org/d3.v4.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+      /* Customize Bootstrap tooltip */
+      .tooltip-inner {
+          white-space: pre-line;  /* Ensures content is displayed with line breaks */
+          font-size: 14px;
+          font-family: 'Arial', sans-serif;
+          max-width: 250px;  /* Limit the width of the tooltip */
+          padding: 10px;
+          border-radius: 5px;
+      }
+  
+      .tooltip.bs-tooltip-top .tooltip-arrow::before,
+      .tooltip.bs-tooltip-right .tooltip-arrow::before,
+      .tooltip.bs-tooltip-bottom .tooltip-arrow::before,
+      .tooltip.bs-tooltip-left .tooltip-arrow::before {
+          border-top-color: #69b3a2;  /* Adjust color of the tooltip arrow */
+      }
+      
+      /* Optional: Add custom styles to the tooltip text */
+      .tooltip-inner {
+          background-color: #333;  /* Tooltip background color */
+          color: #fff;             /* Tooltip text color */
+      }
+      #my_dataviz svg{
+        overflow: visible;
+      }
+      div#my_dataviz {
+    display: flex;
+    justify-content: center;
+    margin-top:5rem;
+} 
+
+g.tick {
+    font-size: 14px;
+    font-weight: bold;
+}
+      g.legend {
+    DISPLAY: NONE;
+}
+  </style>
+  
+</head>
+<body>
+    <div id="my_dataviz"></div>
+
+    <script>
+        // Set chart dimensions
+        const margin = { top: 10, right: 30, bottom: 50, left: 100 },
+            width = 1580 - margin.left - margin.right,  // Set width to 1080px
+            height = 500 - margin.top - margin.bottom;
+
+        // Append the SVG object to the div
+        const svg = d3.select("#my_dataviz")
+            .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        // Failure reasons
+        const failureReasons = [
+            "API Rate Limit Exceeded", 
+            "Authentication Error", 
+            "Connection Timeout", 
+            "File Not Found"
+        ];
+
+        // Colors for each failure reason
+        const colorScale = d3.scaleOrdinal()
+            .domain(failureReasons)
+            .range(["#69b3a2", "#ff6347", "#ffa500", "#20b2aa"]);
+
+        // Generate random data for the last 24 hours with random execution times
+        const data = [];
+        const now = new Date();
+        for (let i = 0; i < 24; i++) {
+            const hour = new Date(now - (i * 60 * 60 * 1000));
+            failureReasons.forEach((reason, index) => {
+                // Only add data if the reason is selected (randomly occurring 6-7 times within 24hrs)
+                if (Math.random() < 0.3) {  // 30% chance for each failure reason to appear
+                    data.push({
+                        time: hour,
+                        reason: reason,
+                        execution_time: (Math.random() * (50- 30) + 30).toFixed(2),  // Random execution time between 30 and 100
+                        value: (Math.random() * 5000 + 1000).toFixed(2),  // Random values for each reason
+                        lineIndex: index
+                    });
+                }
+            });
+        }
+
+        // Format the data into a flat structure for easier plotting
+        const formattedData = [];
+        data.forEach(d => {
+            formattedData.push({ time: new Date(d.time), reason: d.reason, execution_time: d.execution_time, value: d.value, lineIndex: d.lineIndex });
+        });
+
+        // X axis: Time
+        const x = d3.scaleTime()
+            .domain(d3.extent(formattedData, d => d.time))
+            .range([0, width]);
+
+        svg.append("g")
+            .attr("transform", `translate(0,${height})`)
+            .call(d3.axisBottom(x));
+
+        // Y axis: Failure Reasons
+        const y = d3.scaleBand()
+            .domain(failureReasons)
+            .range([0, height])
+            .padding(0.1);  // Add some padding between lines
+
+        svg.append("g")
+            .call(d3.axisLeft(y));
+
+        // Add dotted lines and bubbles for each failure reason
+        failureReasons.forEach((reason, index) => {
+            const reasonData = formattedData.filter(d => d.reason === reason);
+
+            // Add a dotted line for each failure reason
+            svg.append("g")
+                .attr("class", `line-${reason}`)
+                .selectAll("line")
+                .data(reasonData)
+                .enter().append("line")
+                .attr("x1", d => x(d.time))
+                .attr("y1", d => y(d.reason) + y.bandwidth() / 2)
+                .attr("x2", (d, i) => i < reasonData.length - 1 ? x(reasonData[i + 1].time) : x(d.time))
+                .attr("y2", (d, i) => i < reasonData.length - 1 ? y(reasonData[i + 1].reason) + y.bandwidth() / 2 : y(d.reason) + y.bandwidth() / 2)
+                .style("stroke", colorScale(reason))
+                .style("stroke-dasharray", "5,5");  // Dotted line style
+
+            // Add circles (bubbles)
+            svg.selectAll(`.bubble-${reason}`)
+                .data(reasonData)
+                .enter().append("circle")
+                .attr("cx", d => x(d.time))
+                .attr("cy", d => y(d.reason) + y.bandwidth() / 2)
+                .attr("r", d => (Math.sqrt(d.value / Math.PI))/2)  // Set bubble size based on value
+                .style("fill", colorScale(reason))
+                .style("opacity", 0.6)
+                .attr("data-toggle", "tooltip")
+                .attr("data-test", "tooltip")  // Set data-test attribute
+                .attr("title", d => `${d.reason}\nduration: ${d.execution_time}m\ntime: ${d.time.toLocaleString()}`);
+        });
+
+        // Initialize Bootstrap tooltips
+        $(function () {
+            $('[data-toggle="tooltip"]').tooltip();
+        });
+
+        // Add a legend for failure reasons
+        const legend = svg.append("g")
+            .attr("class", "legend")
+            .attr("transform", "translate(50,50)");
+
+        legend.selectAll("rect")
+            .data(failureReasons)
+            .enter().append("rect")
+            .attr("x", 0)
+            .attr("y", (d, i) => i * 20)
+            .attr("width", 15)
+            .attr("height", 15)
+            .style("fill", d => colorScale(d));
+
+        legend.selectAll("text")
+            .data(failureReasons)
+            .enter().append("text")
+            .attr("x", 20)
+            .attr("y", (d, i) => i * 20 + 10)
+            .text(d => d);
+
+        // Handle hover functionality to show/hide connected lines
+        // svg.selectAll("circle")
+        //     .on("mouseover", function(event, d) {
+        //         const hoveredReason = d.reason;
+        //         svg.selectAll(`.line-${hoveredReason}`)
+        //             .style("opacity", 1);
+        //         svg.selectAll(`circle`)
+        //             .style("opacity", (d) => d.reason === hoveredReason ? 1 : 0.2);
+        //     })
+        //     .on("mouseout", function() {
+        //         svg.selectAll("circle")
+        //             .style("opacity", 0.6);
+        //         svg.selectAll("line")
+        //             .style("opacity", 1);  // Reset dotted lines to full opacity
+        //     });
+    </script>
+</body>
+</html>
